@@ -1,70 +1,27 @@
-import logging
-from flask import Flask
+import time
 
-from flask import request
-import sys
-from wechatpy.utils import check_signature
-from wechatpy.exceptions import InvalidSignatureException,InvalidAppIdException
-from wechatpy import parse_message
-from wechatpy.replies import create_reply
-from wechatpy.replies import TextReply
-from wechatpy import WeChatClient
+from flask import Flask, request
+from loguru import logger
 
-from transformers import AutoTokenizer, AutoModel
+from wx.wx_handle import WxHandle
 
-from threading import Thread
-
-client = WeChatClient('wxe1ce7221aa9b8225', '7eb79a6a232ebeab03fa840b74f1513f')
+# 配置web框架
 app = Flask(__name__)
-app.debug = True
-handler = logging.StreamHandler()
-app.logger.addHandler(handler)
-wechatToken = "peterli2015"
-
-tokenizer = AutoTokenizer.from_pretrained("THUDM/chatglm-6b-int4", trust_remote_code=True)
-model = AutoModel.from_pretrained("THUDM/chatglm-6b-int4", trust_remote_code=True).float()
+# 日志文件保存10天日志，最大存储500M
+logger.add("./log/runtime_{time}.log", retention="10 days", rotation="500 MB")
 
 
-def asyncTask(userId, content):
-    print("ask a quesion with userId:{}, content:{}".format(userId, content))
-    response, history = model.chat(tokenizer, content, history=[])
-    print("chat-GLB replay:{}".format(response))
-    client.message.send_text(userId, response)
+# 暴露路由，接收get和post请求
+@app.route('/', methods=["GET", "POST"])
+def wx_listener():
+    # 通过getattr获取到WxHandle的静态get或post方法，lower是为了将大写method值转为小写，与WxHandle中的方法名对应
+    fun = getattr(WxHandle, request.method.lower())
+    # 调用得到的get或post方法
+    return fun()
 
 
-@app.route('/wechat', methods=['GET', 'POST'])
-def wechat():
-    timestamp = request.args.get("timestamp")
-    nonce = request.args.get("nonce")
-    if request.method == 'GET':
-        # token, signature, timestamp, nonce
-        echostr = request.args.get("echostr")
-        signature = request.args.get("signature")
-        if echostr:
-            print("request timestamp:{},nonce:{}, echostr:{}, signature:{}".format(timestamp, 
-                         nonce, echostr, signature))
-            try:
-                check_signature(wechatToken, signature, timestamp, nonce)
-                return echostr
-            except InvalidSignatureException:
-                print("invalid message from request")
-    else:
-        xml = request.data
-        if xml:
-            try:
-                msg = parse_message(xml)
-                print("message from wechat msg:{}".format(msg))
+if __name__ == "__main__":
+    # 监听8880端口
+    app.run(host="0.0.0.0", port=8880)
 
-                t1 = Thread(target=asyncTask, args=(msg.source, msg.content))
-                t1.start()
-                
-                return "success"
-            except (InvalidAppIdException, InvalidSignatureException):
-                print("cannot decrypt message!")
-        else:
-            print("no xml body, invalid request!")
-    return ""
-if __name__ == '__main__':
-    print('starting wechat of chatGLM')
-    print('completed to load chatGLM')
-    app.run(host='127.0.0.1', port=6006, debug=True)
+
